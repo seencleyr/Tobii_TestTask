@@ -17,6 +17,9 @@ namespace Tobii_TestTask.Core
     {
         private readonly BlockingCollection<SimpleTask> _queue = new BlockingCollection<SimpleTask>(new ConcurrentQueue<SimpleTask>());
         public bool IsActive { get; private set; }
+        //SpinLock - because Add method can be executed many times and we don't want to create garbage for each add
+        //and also because our locked operation is fast
+        static SpinLock _spinlock = new SpinLock();
 
         public void Run()
         {
@@ -67,12 +70,24 @@ namespace Tobii_TestTask.Core
                 return null;
             }
 
-            //Creation and Adding can has a different order
-            //Task says only about "executed sequentially in order they were added."
-            SimpleTask task = new SimpleTask(taskAction);
-            _queue.Add(task);
+            //After re-thinking task, I understand my mistake: 
+            //the app should guarantee that task that entered "first" should also be created AND added first
+            bool lockTaken = false;
+            try
+            {
+                _spinlock.Enter(ref lockTaken);
+                SimpleTask task = new SimpleTask(taskAction);
+                _queue.Add(task);
 
-            return task;
+                return task;
+            }
+            finally
+            {
+                if (lockTaken)
+                {
+                    _spinlock.Exit(false);
+                }
+            }
         }
     }
 }
